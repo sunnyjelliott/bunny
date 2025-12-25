@@ -52,6 +52,45 @@ add_executable(${PROJECT_NAME}
     src/app.cpp
 )
 
+find_program(GLSLC glslc HINTS 
+    $ENV{VULKAN_SDK}/Bin
+    $ENV{VULKAN_SDK}/bin
+)
+
+if(NOT GLSLC)
+    message(FATAL_ERROR "glslc not found! Make sure Vulkan SDK is installed.")
+endif()
+
+# Shader compilation
+set(SHADER_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/shaders)
+set(SHADER_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/shaders)
+
+
+file(MAKE_DIRECTORY ${SHADER_BINARY_DIR})
+
+set(SHADERS
+    ${SHADER_SOURCE_DIR}/triangle.vert
+    ${SHADER_SOURCE_DIR}/triangle.frag
+)
+
+foreach(SHADER ${SHADERS})
+    get_filename_component(SHADER_NAME ${SHADER} NAME)
+    string(REPLACE "." "_" SHADER_NAME ${SHADER_NAME})
+    set(SHADER_OUTPUT ${SHADER_BINARY_DIR}/${SHADER_NAME}.spv)
+    
+    add_custom_command(
+        OUTPUT ${SHADER_OUTPUT}
+        COMMAND ${GLSLC} ${SHADER} -o ${SHADER_OUTPUT}
+        DEPENDS ${SHADER}
+        COMMENT "Compiling ${SHADER}"
+    )
+    
+    list(APPEND SHADER_BINARIES ${SHADER_OUTPUT})
+endforeach()
+
+add_custom_target(Shaders ALL DEPENDS ${SHADER_BINARIES})
+add_dependencies(${PROJECT_NAME} Shaders)
+
 target_include_directories(${PROJECT_NAME} PRIVATE include)
 
 target_link_libraries(${PROJECT_NAME} PRIVATE 
