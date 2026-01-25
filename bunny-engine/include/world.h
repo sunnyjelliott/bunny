@@ -17,6 +17,12 @@ class World {
 	void destroyEntity(Entity entity);
 	bool isEntityAlive(Entity entity) const;
 
+	// Heirarchy helpers
+	void setParent(Entity child, Entity parent);
+	void removeParent(Entity child);
+	Entity getParent(Entity child) const;
+	const std::vector<Entity>& getChildren(Entity parent) const;
+
 	// Component management
 	template <typename T>
 	void addComponent(Entity entity, T&& component);

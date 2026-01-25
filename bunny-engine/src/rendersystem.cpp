@@ -1,5 +1,9 @@
 #include "rendersystem.h"
 
+#include <vk_mem_alloc.h>
+
+#include "camerasystem.h"
+#include "meshloader.h"
 #include "world.h"
 
 static std::vector<char> readFile(const std::string& filename) {
@@ -19,6 +23,123 @@ static std::vector<char> readFile(const std::string& filename) {
 	return buffer;
 }
 
+static uint32_t findMemoryType(VkPhysicalDevice physicalDevice,
+                               uint32_t typeFilter,
+                               VkMemoryPropertyFlags properties) {
+	VkPhysicalDeviceMemoryProperties memProperties;
+	vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memProperties);
+
+	for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++) {
+		if ((typeFilter & (1 << i)) &&
+		    (memProperties.memoryTypes[i].propertyFlags & properties) ==
+		        properties) {
+			return i;
+		}
+	}
+
+	throw std::runtime_error("Failed to find suitable memory type!");
+}
+
+std::vector<Vertex> createCubeVertices() {
+	return {
+	    // 8 unique vertices
+	    {{-0.5f, -0.5f, -0.5f}, {0.0f, 1.0f, 1.0f}},  // 0: back-bottom-left
+	    {{0.5f, -0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},   // 1: back-bottom-right
+	    {{0.5f, 0.5f, -0.5f}, {0.0f, 0.0f, 1.0f}},    // 2: back-top-right
+	    {{-0.5f, 0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},   // 3: back-top-left
+	    {{-0.5f, -0.5f, 0.5f}, {1.0f, 0.0f, 0.0f}},   // 4: front-bottom-left
+	    {{0.5f, -0.5f, 0.5f}, {1.0f, 0.0f, 0.0f}},    // 5: front-bottom-right
+	    {{0.5f, 0.5f, 0.5f}, {1.0f, 0.0f, 1.0f}},     // 6: front-top-right
+	    {{-0.5f, 0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}},    // 7: front-top-left
+	};
+}
+
+std::vector<uint32_t> createCubeIndices() {
+	return {
+	    // Front face
+	    4,
+	    5,
+	    6,
+	    4,
+	    6,
+	    7,
+	    // Back face
+	    1,
+	    0,
+	    3,
+	    1,
+	    3,
+	    2,
+	    // Top face
+	    7,
+	    6,
+	    2,
+	    7,
+	    2,
+	    3,
+	    // Bottom face
+	    0,
+	    1,
+	    5,
+	    0,
+	    5,
+	    4,
+	    // Right face
+	    5,
+	    1,
+	    2,
+	    5,
+	    2,
+	    6,
+	    // Left face
+	    0,
+	    4,
+	    7,
+	    0,
+	    7,
+	    3,
+	};
+}
+
+std::vector<Vertex> createPyramidVertices() {
+	return {
+	    // 5 unique vertices
+	    {{-0.5f, 0.0f, -0.5f}, {1.0f, 1.0f, 1.0f}},  // 0: base back-left
+	    {{0.5f, 0.0f, -0.5f}, {1.0f, 1.0f, 1.0f}},   // 1: base back-right
+	    {{0.5f, 0.0f, 0.5f}, {1.0f, 1.0f, 1.0f}},    // 2: base front-right
+	    {{-0.5f, 0.0f, 0.5f}, {1.0f, 1.0f, 1.0f}},   // 3: base front-left
+	    {{0.0f, 1.0f, 0.0f}, {1.0f, 1.0f, 0.0f}},    // 4: apex
+	};
+}
+
+std::vector<uint32_t> createPyramidIndices() {
+	return {
+	    // Base
+	    0,
+	    1,
+	    2,
+	    0,
+	    2,
+	    3,
+	    // Front
+	    3,
+	    2,
+	    4,
+	    // Right
+	    2,
+	    1,
+	    4,
+	    // Back
+	    1,
+	    0,
+	    4,
+	    // Left
+	    0,
+	    3,
+	    4,
+	};
+}
+
 void RenderSystem::initialize(VulkanContext& context, SwapChain& swapChain) {
 	m_context = &context;
 	m_swapChainFormat = swapChain.getImageFormat();
@@ -26,7 +147,7 @@ void RenderSystem::initialize(VulkanContext& context, SwapChain& swapChain) {
 	createRenderPass();
 	createGraphicsPipeline();
 	swapChain.createFramebuffers(m_renderPass);
-	createVertexBuffer();
+	createMeshBuffers();
 	createCommandBuffer();
 	createSyncObjects();
 }
@@ -38,16 +159,40 @@ void RenderSystem::cleanup() {
 	                   nullptr);
 	vkDestroyFence(m_context->getDevice(), m_inFlightFence, nullptr);
 
-	vkDestroyBuffer(m_context->getDevice(), m_vertexBuffer, nullptr);
-	vkFreeMemory(m_context->getDevice(), m_vertexBufferMemory, nullptr);
+	vmaDestroyBuffer(m_context->getAllocator(), m_indexBuffer,
+	                 m_indexBufferAllocation);
+	vmaDestroyBuffer(m_context->getAllocator(), m_vertexBuffer,
+	                 m_vertexBufferAllocation);
 
 	vkDestroyPipeline(m_context->getDevice(), m_graphicsPipeline, nullptr);
 	vkDestroyPipelineLayout(m_context->getDevice(), m_pipelineLayout, nullptr);
 	vkDestroyRenderPass(m_context->getDevice(), m_renderPass, nullptr);
 }
 
+uint32_t RenderSystem::loadMesh(const std::string& filepath) {
+	LoadedMesh loadedMesh = MeshLoader::loadOBJ(filepath);
+
+	uint32_t meshID = m_nextMeshID++;
+
+	m_meshes[meshID] = {
+	    .firstVertex = static_cast<uint32_t>(m_allVertices.size()),
+	    .vertexCount = static_cast<uint32_t>(loadedMesh.vertices.size()),
+	    .firstIndex = static_cast<uint32_t>(m_allIndices.size()),
+	    .indexCount = static_cast<uint32_t>(loadedMesh.indices.size())};
+
+	m_allVertices.insert(m_allVertices.end(), loadedMesh.vertices.begin(),
+	                     loadedMesh.vertices.end());
+	m_allIndices.insert(m_allIndices.end(), loadedMesh.indices.begin(),
+	                    loadedMesh.indices.end());
+
+	// Re-upload all mesh data
+	uploadMeshData(m_allVertices, m_allIndices);
+
+	return meshID;
+}
+
 void RenderSystem::drawFrame(SwapChain& swapChain, World& world,
-                             const Camera& camera) {
+                             const CameraSystem& cameraSystem) {
 	vkWaitForFences(m_context->getDevice(), 1, &m_inFlightFence, VK_TRUE,
 	                UINT64_MAX);
 	vkResetFences(m_context->getDevice(), 1, &m_inFlightFence);
@@ -58,7 +203,8 @@ void RenderSystem::drawFrame(SwapChain& swapChain, World& world,
 	                      &imageIndex);
 
 	vkResetCommandBuffer(m_commandBuffer, 0);
-	recordCommandBuffer(m_commandBuffer, imageIndex, swapChain, world, camera);
+	recordCommandBuffer(m_commandBuffer, imageIndex, swapChain, world,
+	                    cameraSystem);
 
 	VkSubmitInfo submitInfo{};
 	submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -311,10 +457,75 @@ void RenderSystem::createSyncObjects() {
 	}
 }
 
+void RenderSystem::uploadMeshData(const std::vector<Vertex>& vertices,
+                                  const std::vector<uint32_t>& indices) {
+	// Clean up old buffers if they exist
+	if (m_vertexBuffer != VK_NULL_HANDLE) {
+		vmaDestroyBuffer(m_context->getAllocator(), m_vertexBuffer,
+		                 m_vertexBufferAllocation);
+	}
+	if (m_indexBuffer != VK_NULL_HANDLE) {
+		vmaDestroyBuffer(m_context->getAllocator(), m_indexBuffer,
+		                 m_indexBufferAllocation);
+	}
+
+	// Create vertex buffer
+	VkDeviceSize vertexBufferSize = sizeof(Vertex) * vertices.size();
+
+	VkBufferCreateInfo vertexBufferInfo{};
+	vertexBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+	vertexBufferInfo.size = vertexBufferSize;
+	vertexBufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+	vertexBufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+	VmaAllocationCreateInfo vertexAllocInfo{};
+	vertexAllocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+	vertexAllocInfo.flags =
+	    VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+	    VMA_ALLOCATION_CREATE_MAPPED_BIT;
+
+	VmaAllocationInfo vertexAllocInfoResult;
+	if (vmaCreateBuffer(m_context->getAllocator(), &vertexBufferInfo,
+	                    &vertexAllocInfo, &m_vertexBuffer,
+	                    &m_vertexBufferAllocation,
+	                    &vertexAllocInfoResult) != VK_SUCCESS) {
+		throw std::runtime_error("Failed to create vertex buffer with VMA!");
+	}
+
+	memcpy(vertexAllocInfoResult.pMappedData, vertices.data(),
+	       (size_t)vertexBufferSize);
+
+	// Create index buffer
+	VkDeviceSize indexBufferSize = sizeof(uint32_t) * indices.size();
+
+	VkBufferCreateInfo indexBufferInfo{};
+	indexBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+	indexBufferInfo.size = indexBufferSize;
+	indexBufferInfo.usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
+	indexBufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+	VmaAllocationCreateInfo indexAllocInfo{};
+	indexAllocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+	indexAllocInfo.flags =
+	    VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+	    VMA_ALLOCATION_CREATE_MAPPED_BIT;
+
+	VmaAllocationInfo indexAllocInfoResult;
+	if (vmaCreateBuffer(m_context->getAllocator(), &indexBufferInfo,
+	                    &indexAllocInfo, &m_indexBuffer,
+	                    &m_indexBufferAllocation,
+	                    &indexAllocInfoResult) != VK_SUCCESS) {
+		throw std::runtime_error("Failed to create index buffer with VMA!");
+	}
+
+	memcpy(indexAllocInfoResult.pMappedData, indices.data(),
+	       (size_t)indexBufferSize);
+}
+
 void RenderSystem::recordCommandBuffer(VkCommandBuffer commandBuffer,
                                        uint32_t imageIndex,
                                        SwapChain& swapChain, World& world,
-                                       const Camera& camera) {
+                                       const CameraSystem& cameraSystem) {
 	VkCommandBufferBeginInfo beginInfo{};
 	beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 
@@ -356,10 +567,12 @@ void RenderSystem::recordCommandBuffer(VkCommandBuffer commandBuffer,
 	VkDeviceSize offsets[] = {0};
 	vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
 
-	float aspectRatio =
-	    swapChain.getExtent().width / (float)swapChain.getExtent().height;
-	glm::mat4 view = camera.getViewMatrix();
-	glm::mat4 projection = camera.getProjectionMatrix(aspectRatio);
+	vkCmdBindIndexBuffer(commandBuffer, m_indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+
+	float aspectRatio = (float)swapChain.getExtent().width /
+	                    (float)swapChain.getExtent().height;
+	glm::mat4 view = cameraSystem.getViewMatrix(world);
+	glm::mat4 projection = cameraSystem.getProjectionMatrix(world, aspectRatio);
 
 	for (Entity entity : world.view<Transform, MeshRenderer>()) {
 		Transform& transform = world.getComponent<Transform>(entity);
@@ -373,10 +586,7 @@ void RenderSystem::recordCommandBuffer(VkCommandBuffer commandBuffer,
 		const MeshInfo& meshInfo = it->second;
 
 		// Create model matrix from transform
-		glm::mat4 model = glm::mat4(1.0f);
-		model = glm::translate(model, transform.position);
-		model = model * glm::mat4_cast(transform.rotation);
-		model = glm::scale(model, transform.scale);
+		glm::mat4 model = transform.worldMatrix;
 
 		struct {
 			glm::mat4 model;
@@ -392,9 +602,8 @@ void RenderSystem::recordCommandBuffer(VkCommandBuffer commandBuffer,
 		                   VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pushConstants),
 		                   &pushConstants);
 
-		// Draw the mesh (for now, always the cube)
-		vkCmdDraw(commandBuffer, meshInfo.vertexCount, 1, meshInfo.firstVertex,
-		          0);
+		vkCmdDrawIndexed(commandBuffer, meshInfo.indexCount, 1,
+		                 meshInfo.firstIndex, meshInfo.firstVertex, 0);
 	}
 
 	vkCmdEndRenderPass(commandBuffer);
@@ -419,159 +628,35 @@ VkShaderModule RenderSystem::createShaderModule(const std::vector<char>& code) {
 	return shaderModule;
 }
 
-std::vector<Vertex> RenderSystem::createCubeVertices() {
-	return {
-	    // Front face (red)
-	    {{-0.5f, -0.5f, 0.5f}, {1.0f, 0.0f, 0.0f}},
-	    {{0.5f, -0.5f, 0.5f}, {1.0f, 0.0f, 0.0f}},
-	    {{0.5f, 0.5f, 0.5f}, {1.0f, 0.0f, 0.0f}},
-	    {{-0.5f, -0.5f, 0.5f}, {1.0f, 0.0f, 0.0f}},
-	    {{0.5f, 0.5f, 0.5f}, {1.0f, 0.0f, 0.0f}},
-	    {{-0.5f, 0.5f, 0.5f}, {1.0f, 0.0f, 0.0f}},
-
-	    // Back face (green)
-	    {{0.5f, -0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},
-	    {{-0.5f, -0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},
-	    {{-0.5f, 0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},
-	    {{0.5f, -0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},
-	    {{-0.5f, 0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},
-	    {{0.5f, 0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},
-
-	    // Top face (blue)
-	    {{-0.5f, 0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}},
-	    {{0.5f, 0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}},
-	    {{0.5f, 0.5f, -0.5f}, {0.0f, 0.0f, 1.0f}},
-	    {{-0.5f, 0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}},
-	    {{0.5f, 0.5f, -0.5f}, {0.0f, 0.0f, 1.0f}},
-	    {{-0.5f, 0.5f, -0.5f}, {0.0f, 0.0f, 1.0f}},
-
-	    // Bottom face (yellow)
-	    {{-0.5f, -0.5f, -0.5f}, {1.0f, 1.0f, 0.0f}},
-	    {{0.5f, -0.5f, -0.5f}, {1.0f, 1.0f, 0.0f}},
-	    {{0.5f, -0.5f, 0.5f}, {1.0f, 1.0f, 0.0f}},
-	    {{-0.5f, -0.5f, -0.5f}, {1.0f, 1.0f, 0.0f}},
-	    {{0.5f, -0.5f, 0.5f}, {1.0f, 1.0f, 0.0f}},
-	    {{-0.5f, -0.5f, 0.5f}, {1.0f, 1.0f, 0.0f}},
-
-	    // Right face (magenta)
-	    {{0.5f, -0.5f, 0.5f}, {1.0f, 0.0f, 1.0f}},
-	    {{0.5f, -0.5f, -0.5f}, {1.0f, 0.0f, 1.0f}},
-	    {{0.5f, 0.5f, -0.5f}, {1.0f, 0.0f, 1.0f}},
-	    {{0.5f, -0.5f, 0.5f}, {1.0f, 0.0f, 1.0f}},
-	    {{0.5f, 0.5f, -0.5f}, {1.0f, 0.0f, 1.0f}},
-	    {{0.5f, 0.5f, 0.5f}, {1.0f, 0.0f, 1.0f}},
-
-	    // Left face (cyan)
-	    {{-0.5f, -0.5f, -0.5f}, {0.0f, 1.0f, 1.0f}},
-	    {{-0.5f, -0.5f, 0.5f}, {0.0f, 1.0f, 1.0f}},
-	    {{-0.5f, 0.5f, 0.5f}, {0.0f, 1.0f, 1.0f}},
-	    {{-0.5f, -0.5f, -0.5f}, {0.0f, 1.0f, 1.0f}},
-	    {{-0.5f, 0.5f, 0.5f}, {0.0f, 1.0f, 1.0f}},
-	    {{-0.5f, 0.5f, -0.5f}, {0.0f, 1.0f, 1.0f}},
-	};
-}
-
-std::vector<Vertex> RenderSystem::createPyramidVertices() {
-	return {
-	    // Base (white)
-	    {{-0.5f, 0.0f, -0.5f}, {1.0f, 1.0f, 1.0f}},
-	    {{0.5f, 0.0f, -0.5f}, {1.0f, 1.0f, 1.0f}},
-	    {{0.5f, 0.0f, 0.5f}, {1.0f, 1.0f, 1.0f}},
-	    {{-0.5f, 0.0f, -0.5f}, {1.0f, 1.0f, 1.0f}},
-	    {{0.5f, 0.0f, 0.5f}, {1.0f, 1.0f, 1.0f}},
-	    {{-0.5f, 0.0f, 0.5f}, {1.0f, 1.0f, 1.0f}},
-
-	    // Front (red)
-	    {{-0.5f, 0.0f, 0.5f}, {1.0f, 0.0f, 0.0f}},
-	    {{0.5f, 0.0f, 0.5f}, {1.0f, 0.0f, 0.0f}},
-	    {{0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}},
-
-	    // Right (green)
-	    {{0.5f, 0.0f, 0.5f}, {0.0f, 1.0f, 0.0f}},
-	    {{0.5f, 0.0f, -0.5f}, {0.0f, 1.0f, 0.0f}},
-	    {{0.0f, 1.0f, 0.0f}, {0.0f, 1.0f, 0.0f}},
-
-	    // Back (blue)
-	    {{0.5f, 0.0f, -0.5f}, {0.0f, 0.0f, 1.0f}},
-	    {{-0.5f, 0.0f, -0.5f}, {0.0f, 0.0f, 1.0f}},
-	    {{0.0f, 1.0f, 0.0f}, {0.0f, 0.0f, 1.0f}},
-
-	    // Left (yellow)
-	    {{-0.5f, 0.0f, -0.5f}, {1.0f, 1.0f, 0.0f}},
-	    {{-0.5f, 0.0f, 0.5f}, {1.0f, 1.0f, 0.0f}},
-	    {{0.0f, 1.0f, 0.0f}, {1.0f, 1.0f, 0.0f}},
-	};
-}
-
-uint32_t findMemoryType(VkPhysicalDevice physicalDevice, uint32_t typeFilter,
-                        VkMemoryPropertyFlags properties) {
-	VkPhysicalDeviceMemoryProperties memProperties;
-	vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memProperties);
-
-	for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++) {
-		if ((typeFilter & (1 << i)) &&
-		    (memProperties.memoryTypes[i].propertyFlags & properties) ==
-		        properties) {
-			return i;
-		}
-	}
-
-	throw std::runtime_error("Failed to find suitable memory type!");
-}
-
-void RenderSystem::createVertexBuffer() {
-	std::vector<Vertex> allVertices;
+void RenderSystem::createMeshBuffers() {
+	// Load built-in meshes
 
 	// Mesh 0: Cube
 	auto cubeVerts = createCubeVertices();
-	m_meshes[0] = {.firstVertex = static_cast<uint32_t>(allVertices.size()),
-	               .vertexCount = static_cast<uint32_t>(cubeVerts.size())};
-	allVertices.insert(allVertices.end(), cubeVerts.begin(), cubeVerts.end());
+	auto cubeIndices = createCubeIndices();
+	m_meshes[m_nextMeshID++] = {
+	    .firstVertex = static_cast<uint32_t>(m_allVertices.size()),
+	    .vertexCount = static_cast<uint32_t>(cubeVerts.size()),
+	    .firstIndex = static_cast<uint32_t>(m_allIndices.size()),
+	    .indexCount = static_cast<uint32_t>(cubeIndices.size())};
+	m_allVertices.insert(m_allVertices.end(), cubeVerts.begin(),
+	                     cubeVerts.end());
+	m_allIndices.insert(m_allIndices.end(), cubeIndices.begin(),
+	                    cubeIndices.end());
 
 	// Mesh 1: Pyramid
 	auto pyramidVerts = createPyramidVertices();
-	m_meshes[1] = {.firstVertex = static_cast<uint32_t>(allVertices.size()),
-	               .vertexCount = static_cast<uint32_t>(pyramidVerts.size())};
-	allVertices.insert(allVertices.end(), pyramidVerts.begin(),
-	                   pyramidVerts.end());
+	auto pyramidIndices = createPyramidIndices();
+	m_meshes[m_nextMeshID++] = {
+	    .firstVertex = static_cast<uint32_t>(m_allVertices.size()),
+	    .vertexCount = static_cast<uint32_t>(pyramidVerts.size()),
+	    .firstIndex = static_cast<uint32_t>(m_allIndices.size()),
+	    .indexCount = static_cast<uint32_t>(pyramidIndices.size())};
+	m_allVertices.insert(m_allVertices.end(), pyramidVerts.begin(),
+	                     pyramidVerts.end());
+	m_allIndices.insert(m_allIndices.end(), pyramidIndices.begin(),
+	                    pyramidIndices.end());
 
-	VkDeviceSize bufferSize = sizeof(Vertex) * allVertices.size();
-
-	// Create vertex buffer
-	VkBufferCreateInfo bufferInfo{};
-	bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-	bufferInfo.size = bufferSize;
-	bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-	bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-	if (vkCreateBuffer(m_context->getDevice(), &bufferInfo, nullptr,
-	                   &m_vertexBuffer) != VK_SUCCESS) {
-		throw std::runtime_error("Failed to create vertex buffer!");
-	}
-
-	VkMemoryRequirements memRequirements;
-	vkGetBufferMemoryRequirements(m_context->getDevice(), m_vertexBuffer,
-	                              &memRequirements);
-
-	VkMemoryAllocateInfo allocInfo{};
-	allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-	allocInfo.allocationSize = memRequirements.size;
-	allocInfo.memoryTypeIndex = findMemoryType(
-	    m_context->getPhysicalDevice(), memRequirements.memoryTypeBits,
-	    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-	        VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-
-	if (vkAllocateMemory(m_context->getDevice(), &allocInfo, nullptr,
-	                     &m_vertexBufferMemory) != VK_SUCCESS) {
-		throw std::runtime_error("Failed to allocate vertex buffer memory!");
-	}
-
-	vkBindBufferMemory(m_context->getDevice(), m_vertexBuffer,
-	                   m_vertexBufferMemory, 0);
-
-	void* data;
-	vkMapMemory(m_context->getDevice(), m_vertexBufferMemory, 0, bufferSize, 0,
-	            &data);
-	memcpy(data, allVertices.data(), (size_t)bufferSize);
-	vkUnmapMemory(m_context->getDevice(), m_vertexBufferMemory);
+	// Upload to GPU
+	uploadMeshData(m_allVertices, m_allIndices);
 }

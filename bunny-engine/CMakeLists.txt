@@ -6,10 +6,11 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 include(FetchContent)
 
+# Vulkan
 find_package(Vulkan REQUIRED)
 
+# GLFW
 find_package(glfw3 3.4 QUIET)
-
 if(NOT glfw3_FOUND)
     message(STATUS "GLFW not found via find_package, fetching from source...")
     
@@ -31,8 +32,8 @@ else()
     message(STATUS "Found GLFW via find_package")
 endif()
 
+# GLM
 find_package(glm QUIET)
-
 if(NOT glm_FOUND)
     message(STATUS "GLM not found via find_package, fetching from source...")
     
@@ -46,6 +47,22 @@ if(NOT glm_FOUND)
 else()
     message(STATUS "Found GLM via find_package")
 endif()
+
+# tinyobjloader
+FetchContent_Declare(
+    tinyobjloader
+    GIT_REPOSITORY https://github.com/tinyobjloader/tinyobjloader.git
+    GIT_TAG v2.0.0rc13
+)
+FetchContent_MakeAvailable(tinyobjloader)
+
+# vma
+FetchContent_Declare(
+    vma
+    GIT_REPOSITORY https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git
+    GIT_TAG v3.3.0
+)
+FetchContent_MakeAvailable(vma)
 
 file(GLOB SOURCES src/*)
 add_executable(${PROJECT_NAME} 
@@ -90,12 +107,22 @@ endforeach()
 add_custom_target(Shaders ALL DEPENDS ${SHADER_BINARIES})
 add_dependencies(${PROJECT_NAME} Shaders)
 
+# Copy assets folder to build directory
+add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        ${CMAKE_SOURCE_DIR}/assets
+        ${CMAKE_BINARY_DIR}/assets
+    COMMENT "Copying assets to build directory"
+)
+
 target_include_directories(${PROJECT_NAME} PRIVATE include)
 
 target_link_libraries(${PROJECT_NAME} PRIVATE 
     Vulkan::Vulkan
     glfw
     glm::glm
+    tinyobjloader
+    VulkanMemoryAllocator
 )
 
 target_precompile_headers(${PROJECT_NAME} PRIVATE include/pch.h)

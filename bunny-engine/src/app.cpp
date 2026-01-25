@@ -1,5 +1,9 @@
 #include "app.h"
 
+#include <vk_mem_alloc.h>
+
+#include "input.h"
+
 void Application::run() {
 	initWindow();
 	initVulkan();
@@ -18,6 +22,11 @@ void Application::initWindow() {
 
 	m_window =
 	    glfwCreateWindow(WIDTH, HEIGHT, "Bunny Engine", nullptr, nullptr);
+
+	m_inputBackend = new GLFWInputBackend(m_window);
+
+	Input::initialize(m_inputBackend);
+	Input::setMouseCaptured(true);
 }
 
 void Application::initVulkan() {
@@ -27,40 +36,69 @@ void Application::initVulkan() {
 }
 
 void Application::initScene() {
-	// Setup camera
-	m_camera.position = glm::vec3(0.0f, 2.0f, 5.0f);
-	m_camera.front = glm::vec3(0.0f, -0.3f, -1.0f);
-
-	// Create cube entities
-	Entity cube1 = m_world.createEntity();
+	// Create camera entity
+	m_activeCamera = m_world.createEntity();
+	m_world.addComponent(m_activeCamera,
+	                     Transform{.position = glm::vec3(0.0f, 2.0f, 8.0f)});
 	m_world.addComponent(
-	    cube1, Transform{.position = glm::vec3(-2.0f, 0.0f, 0.0f),
-	                     .rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f),
-	                     .scale = glm::vec3(1.0f)});
-	m_world.addComponent(cube1, MeshRenderer{.meshID = 0, .visible = true});
+	    m_activeCamera,
+	    Camera{.fov = 45.0f, .nearPlane = 0.1f, .farPlane = 100.0f});
+	m_cameraSystem.setActiveCamera(m_activeCamera);
 
-	Entity cube2 = m_world.createEntity();
-	m_world.addComponent(
-	    cube2, Transform{.position = glm::vec3(2.0f, 0.0f, 0.0f),
-	                     .rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f),
-	                     .scale = glm::vec3(0.8f)});
-	m_world.addComponent(cube2, MeshRenderer{.meshID = 0, .visible = true});
+	// Load a mesh from file (try this after creating the file)
+	uint32_t loadedMeshID =
+	    m_renderSystem.loadMesh("assets/models/viking_room.obj");
 
-	// Create pyramid entities
-	Entity pyramid1 = m_world.createEntity();
+	// Parent cube (built-in mesh 0)
+	Entity parent = m_world.createEntity();
+	m_world.addComponent(parent,
+	                     Transform{.position = glm::vec3(0.0f, 0.0f, 0.0f),
+	                               .scale = glm::vec3(1.5f)});
+	m_world.addComponent(parent, MeshRenderer{.meshID = 0, .visible = true});
+
+	// Child using loaded mesh
+	Entity loadedEntity = m_world.createEntity();
+	m_world.addComponent(loadedEntity,
+	                     Transform{.position = glm::vec3(3.0f, 0.0f, 0.0f),
+	                               .scale = glm::vec3(2.0f)});
 	m_world.addComponent(
-	    pyramid1, Transform{.position = glm::vec3(0.0f, 1.5f, -2.0f),
-	                        .rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f),
-	                        .scale = glm::vec3(1.0f)});
-	m_world.addComponent(pyramid1, MeshRenderer{.meshID = 1, .visible = true});
+	    loadedEntity,
+	    MeshRenderer{.meshID = loadedMeshID,  // Use the loaded mesh
+	                 .visible = true});
 
 	std::cout << "Created " << m_world.getEntityCount() << " entities\n";
 }
 
 void Application::mainLoop() {
+	Entity parent = 0;  // First entity created
+	float rotation = 0.0f;
+
 	while (!glfwWindowShouldClose(m_window)) {
+		float currentTime = static_cast<float>(glfwGetTime());
+		float deltaTime = currentTime - m_lastFrameTime;
+		m_lastFrameTime = currentTime;
+
 		glfwPollEvents();
-		m_renderSystem.drawFrame(m_swapChain, m_world, m_camera);
+
+		if (Input::isActionPressed(InputAction::ToggleMouseCapture)) {
+			Input::setMouseCaptured(!Input::isMouseCaptured());
+		}
+
+		m_cameraSystem.updateFreeFly(
+		    m_world, deltaTime, Input::isActionHeld(InputAction::MoveForward),
+		    Input::isActionHeld(InputAction::MoveBackward),
+		    Input::isActionHeld(InputAction::MoveLeft),
+		    Input::isActionHeld(InputAction::MoveRight),
+		    Input::getActionValue(InputAction::LookHorizontal),
+		    Input::getActionValue(InputAction::LookVertical));
+
+		Input::update();
+
+		// Update transforms
+		m_transformSystem.update(m_world);
+
+		// Render
+		m_renderSystem.drawFrame(m_swapChain, m_world, m_cameraSystem);
 	}
 
 	vkDeviceWaitIdle(m_context.getDevice());

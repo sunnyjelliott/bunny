@@ -1,16 +1,21 @@
 #include "vulkancontext.h"
 
+#define VMA_IMPLEMENTATION
+#include <vk_mem_alloc.h>
+
 void VulkanContext::init(GLFWwindow* window) {
 	createInstance();
 	setupDebugMessenger();
 	createSurface(window);
 	pickPhysicalDevice();
 	createLogicalDevice();
+	createAllocator();
 	createCommandPool();
 }
 
 void VulkanContext::cleanup() {
 	vkDestroyCommandPool(m_device, m_commandPool, nullptr);
+	vmaDestroyAllocator(m_allocator);
 	vkDestroyDevice(m_device, nullptr);
 
 	if (m_enableValidationLayers) {
@@ -192,6 +197,18 @@ void VulkanContext::createCommandPool() {
 	if (vkCreateCommandPool(m_device, &poolInfo, nullptr, &m_commandPool) !=
 	    VK_SUCCESS) {
 		throw std::runtime_error("Failed to create command pool!");
+	}
+}
+
+void VulkanContext::createAllocator() {
+	VmaAllocatorCreateInfo allocatorInfo{};
+	allocatorInfo.vulkanApiVersion = VK_API_VERSION_1_3;
+	allocatorInfo.physicalDevice = m_physicalDevice;
+	allocatorInfo.device = m_device;
+	allocatorInfo.instance = m_instance;
+
+	if (vmaCreateAllocator(&allocatorInfo, &m_allocator) != VK_SUCCESS) {
+		throw std::runtime_error("Failed to create VMA allocator!");
 	}
 }
 

@@ -1,5 +1,8 @@
 #pragma once
+
 #include "pch.h"
+
+typedef struct VmaAllocator_T* VmaAllocator;
 
 struct QueueFamilyIndices {
 	std::optional<uint32_t> graphicsFamily;
@@ -29,6 +32,7 @@ class VulkanContext {
 	VkQueue getGraphicsQueue() const { return m_graphicsQueue; }
 	VkQueue getPresentQueue() const { return m_presentQueue; }
 	VkCommandPool getCommandPool() const { return m_commandPool; }
+	VmaAllocator getAllocator() const { return m_allocator; }
 	QueueFamilyIndices getQueueFamilyIndices() const {
 		return findQueueFamilies(m_physicalDevice);
 	}
@@ -42,6 +46,7 @@ class VulkanContext {
 	void pickPhysicalDevice();
 	void createLogicalDevice();
 	void createCommandPool();
+	void createAllocator();
 
 	// Helper functions
 	bool checkValidationLayerSupport();
@@ -68,6 +73,7 @@ class VulkanContext {
 	VkQueue m_graphicsQueue = VK_NULL_HANDLE;
 	VkQueue m_presentQueue = VK_NULL_HANDLE;
 	VkCommandPool m_commandPool = VK_NULL_HANDLE;
+	VmaAllocator m_allocator = VK_NULL_HANDLE;
 
 	// Validation layers and extensions
 	const std::vector<const char*> m_validationLayers = {
