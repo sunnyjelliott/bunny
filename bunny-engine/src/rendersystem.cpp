@@ -677,44 +677,56 @@ void RenderSystem::recordCommandBuffer(VkCommandBuffer commandBuffer,
 	VkBuffer vertexBuffers[] = {m_vertexBuffer};
 	VkDeviceSize offsets[] = {0};
 	vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
-
 	vkCmdBindIndexBuffer(commandBuffer, m_indexBuffer, 0, VK_INDEX_TYPE_UINT32);
 
-	float aspectRatio = (float)swapChain.getExtent().width /
-	                    (float)swapChain.getExtent().height;
+	// Calculate view and projection matrices once
+	float aspectRatio =
+	    swapChain.getExtent().width / (float)swapChain.getExtent().height;
 	glm::mat4 view = cameraSystem.getViewMatrix(world);
 	glm::mat4 projection = cameraSystem.getProjectionMatrix(world, aspectRatio);
 
+	// Render all entities with Transform + MeshRenderer
 	for (Entity entity : world.view<Transform, MeshRenderer>()) {
 		Transform& transform = world.getComponent<Transform>(entity);
 		MeshRenderer& meshRenderer = world.getComponent<MeshRenderer>(entity);
 
 		if (!meshRenderer.visible) continue;
 
-		auto it = m_meshes.find(meshRenderer.meshID);
-		if (it == m_meshes.end()) continue;
+		// Get all mesh IDs (handles both single and multiple)
+		std::vector<uint32_t> meshIDsToRender = meshRenderer.getMeshIDs();
 
-		const MeshInfo& meshInfo = it->second;
+		// Render each mesh with the same transform
+		for (uint32_t currentMeshID : meshIDsToRender) {
+			auto it = m_meshes.find(currentMeshID);
+			if (it == m_meshes.end()) {
+				std::cerr << "Warning: Mesh ID " << currentMeshID
+				          << " not found!\n";
+				continue;
+			}
 
-		// Create model matrix from transform
-		glm::mat4 model = transform.worldMatrix;
+			const MeshInfo& meshInfo = it->second;
 
-		struct {
-			glm::mat4 model;
-			glm::mat4 view;
-			glm::mat4 projection;
-		} pushConstants;
+			// Use world matrix from transform
+			glm::mat4 model = transform.worldMatrix;
 
-		pushConstants.model = model;
-		pushConstants.view = view;
-		pushConstants.projection = projection;
+			struct {
+				glm::mat4 model;
+				glm::mat4 view;
+				glm::mat4 projection;
+			} pushConstants;
 
-		vkCmdPushConstants(commandBuffer, m_pipelineLayout,
-		                   VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pushConstants),
-		                   &pushConstants);
+			pushConstants.model = model;
+			pushConstants.view = view;
+			pushConstants.projection = projection;
 
-		vkCmdDrawIndexed(commandBuffer, meshInfo.indexCount, 1,
-		                 meshInfo.firstIndex, meshInfo.firstVertex, 0);
+			vkCmdPushConstants(commandBuffer, m_pipelineLayout,
+			                   VK_SHADER_STAGE_VERTEX_BIT, 0,
+			                   sizeof(pushConstants), &pushConstants);
+
+			// Draw this mesh
+			vkCmdDrawIndexed(commandBuffer, meshInfo.indexCount, 1,
+			                 meshInfo.firstIndex, meshInfo.firstVertex, 0);
+		}
 	}
 
 	vkCmdEndRenderPass(commandBuffer);

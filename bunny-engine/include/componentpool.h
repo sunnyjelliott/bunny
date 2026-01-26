@@ -9,7 +9,8 @@ template <typename T>
 class ComponentPool : public IComponentPool {
    public:
 	// Add component to entity
-	void add(Entity entity, T&& component);
+	template <typename U>
+	void add(Entity entity, U&& component);
 
 	// Remove component from entity
 	void remove(Entity entity) override;
@@ -43,14 +44,15 @@ class ComponentPool : public IComponentPool {
 };
 
 template <typename T>
-void ComponentPool<T>::add(Entity entity, T&& component) {
+template <typename U>
+void ComponentPool<T>::add(Entity entity, U&& component) {
 	if (has(entity)) {
 		throw std::runtime_error("Entity already has this component type!");
 	}
 
 	// Add component to end of array
 	size_t index = m_components.size();
-	m_components.push_back(std::forward<T>(component));
+	m_components.push_back(std::forward<U>(component));
 	m_entities.push_back(entity);
 	m_entityToIndex[entity] = index;
 }

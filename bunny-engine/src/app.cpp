@@ -45,20 +45,29 @@ void Application::initScene() {
 	    Camera{.fov = 45.0f, .nearPlane = 0.1f, .farPlane = 100.0f});
 	m_cameraSystem.setActiveCamera(m_activeCamera);
 
-	// Front cube (should occlude back cube)
-	Entity frontCube = m_world.createEntity();
-	m_world.addComponent(frontCube,
-	                     Transform{.position = glm::vec3(0.0f, 0.0f, 0.0f),
-	                               .scale = glm::vec3(1.0f)});
-	m_world.addComponent(frontCube, MeshRenderer{.meshID = 0, .visible = true});
+	// Test 1: Multiple meshes, single entity
+	Entity multiMesh = m_world.createEntity();
+	m_world.addComponent(multiMesh,
+	                     Transform{.position = glm::vec3(-3.0f, 0.0f, 0.0f),
+	                               .scale = glm::vec3(0.8f)});
+	MeshRenderer multi;
+	multi.meshIDs = {0, 1};  // Cube + pyramid overlapping
+	m_world.addComponent(multiMesh, multi);
 
-	// Back cube (should be partially hidden)
-	Entity backCube = m_world.createEntity();
+	// Test 2: Hierarchical meshes
+	Entity parent = m_world.createEntity();
+	m_world.addComponent(parent,
+	                     Transform{.position = glm::vec3(3.0f, 0.0f, 0.0f),
+	                               .scale = glm::vec3(1.0f)});
+	m_world.addComponent(parent, MeshRenderer{.meshID = 0});  // Parent cube
+
+	Entity child = m_world.createEntity();
 	m_world.addComponent(
-	    backCube, Transform{.position = glm::vec3(0.5f, 0.5f,
-	                                              -2.0f),  // Behind and offset
-	                        .scale = glm::vec3(1.0f)});
-	m_world.addComponent(backCube, MeshRenderer{.meshID = 0, .visible = true});
+	    child,
+	    Transform{.position = glm::vec3(0.0f, 1.5f, 0.0f),  // Above parent
+	              .scale = glm::vec3(0.5f)});
+	m_world.addComponent(child, MeshRenderer{.meshID = 1});  // Child pyramid
+	m_world.setParent(child, parent);
 
 	std::cout << "Created " << m_world.getEntityCount() << " entities\n";
 }

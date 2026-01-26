@@ -70,7 +70,9 @@ void World::addComponent(Entity entity, T&& component) {
 		throw std::runtime_error("Cannot add component to dead entity!");
 	}
 
-	ComponentPool<T>* pool = getOrCreatePool<T>();
+	using ComponentType = std::remove_reference_t<T>;
+
+	ComponentPool<ComponentType>* pool = getOrCreatePool<ComponentType>();
 	pool->add(entity, std::forward<T>(component));
 }
 
@@ -80,7 +82,8 @@ void World::removeComponent(Entity entity) {
 		throw std::runtime_error("Cannot remove component from dead entity!");
 	}
 
-	ComponentPool<T>* pool = getComponentPool<T>();
+	using ComponentType = std::decay_t<T>;
+	ComponentPool<ComponentType>* pool = getComponentPool<ComponentType>();
 	if (pool) {
 		pool->remove(entity);
 	}
@@ -92,7 +95,9 @@ bool World::hasComponent(Entity entity) const {
 		return false;
 	}
 
-	const ComponentPool<T>* pool = getComponentPool<T>();
+	using ComponentType = std::decay_t<T>;
+	const ComponentPool<ComponentType>* pool =
+	    getComponentPool<ComponentType>();
 	return pool ? pool->has(entity) : false;
 }
 
@@ -102,7 +107,8 @@ T& World::getComponent(Entity entity) {
 		throw std::runtime_error("Cannot get component from dead entity!");
 	}
 
-	ComponentPool<T>* pool = getComponentPool<T>();
+	using ComponentType = std::decay_t<T>;
+	ComponentPool<ComponentType>* pool = getComponentPool<ComponentType>();
 	if (!pool) {
 		throw std::runtime_error("Component pool does not exist!");
 	}
@@ -116,7 +122,9 @@ const T& World::getComponent(Entity entity) const {
 		throw std::runtime_error("Cannot get component from dead entity!");
 	}
 
-	const ComponentPool<T>* pool = getComponentPool<T>();
+	using ComponentType = std::decay_t<T>;
+	const ComponentPool<ComponentType>* pool =
+	    getComponentPool<ComponentType>();
 	if (!pool) {
 		throw std::runtime_error("Component pool does not exist!");
 	}
@@ -125,42 +133,45 @@ const T& World::getComponent(Entity entity) const {
 }
 
 template <typename T>
-ComponentPool<T>* World::getComponentPool() {
-	std::type_index typeIndex(typeid(T));
+const ComponentPool<T>* World::getComponentPool() const {
+	using ComponentType = std::decay_t<T>;
+	std::type_index typeIndex(typeid(ComponentType));
 
 	auto it = m_componentPools.find(typeIndex);
 	if (it == m_componentPools.end()) {
 		return nullptr;
 	}
 
-	return static_cast<ComponentPool<T>*>(it->second.get());
+	return static_cast<const ComponentPool<ComponentType>*>(it->second.get());
 }
 
 template <typename T>
-const ComponentPool<T>* World::getComponentPool() const {
-	std::type_index typeIndex(typeid(T));
+ComponentPool<T>* World::getComponentPool() {
+	using ComponentType = std::decay_t<T>;
+	std::type_index typeIndex(typeid(ComponentType));
 
 	auto it = m_componentPools.find(typeIndex);
 	if (it == m_componentPools.end()) {
 		return nullptr;
 	}
 
-	return static_cast<const ComponentPool<T>*>(it->second.get());
+	return static_cast<ComponentPool<ComponentType>*>(it->second.get());
 }
 
 template <typename T>
 ComponentPool<T>* World::getOrCreatePool() {
-	std::type_index typeIndex(typeid(T));
+	using ComponentType = std::decay_t<T>;
+	std::type_index typeIndex(typeid(ComponentType));
 
 	auto it = m_componentPools.find(typeIndex);
 	if (it == m_componentPools.end()) {
-		auto pool = std::make_unique<ComponentPool<T>>();
-		ComponentPool<T>* poolPtr = pool.get();
+		auto pool = std::make_unique<ComponentPool<ComponentType>>();
+		ComponentPool<ComponentType>* poolPtr = pool.get();
 		m_componentPools[typeIndex] = std::move(pool);
 		return poolPtr;
 	}
 
-	return static_cast<ComponentPool<T>*>(it->second.get());
+	return static_cast<ComponentPool<ComponentType>*>(it->second.get());
 }
 
 // View implementation
