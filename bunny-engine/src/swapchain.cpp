@@ -1,13 +1,20 @@
 #include "swapchain.h"
 
+#include <vk_mem_alloc.h>
+
 void SwapChain::init(VulkanContext& context, GLFWwindow* window, uint32_t width,
                      uint32_t height) {
 	m_device = context.getDevice();
+	m_allocator = context.getAllocator();
 	createSwapChain(context, width, height);
 	createImageViews(context);
+	createDepthResources(context);
 }
 
 void SwapChain::cleanup() {
+	vkDestroyImageView(m_device, m_depthImageView, nullptr);
+	vmaDestroyImage(m_allocator, m_depthImage, m_depthImageAllocation);
+
 	for (auto framebuffer : m_framebuffers) {
 		vkDestroyFramebuffer(m_device, framebuffer, nullptr);
 	}
@@ -23,13 +30,15 @@ void SwapChain::createFramebuffers(VkRenderPass renderPass) {
 	m_framebuffers.resize(m_imageViews.size());
 
 	for (size_t i = 0; i < m_imageViews.size(); i++) {
-		VkImageView attachments[] = {m_imageViews[i]};
+		std::array<VkImageView, 2> attachments = {m_imageViews[i],
+		                                          m_depthImageView};
 
 		VkFramebufferCreateInfo framebufferInfo{};
 		framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
 		framebufferInfo.renderPass = renderPass;
-		framebufferInfo.attachmentCount = 1;
-		framebufferInfo.pAttachments = attachments;
+		framebufferInfo.attachmentCount =
+		    static_cast<uint32_t>(attachments.size());
+		framebufferInfo.pAttachments = attachments.data();
 		framebufferInfo.width = m_extent.width;
 		framebufferInfo.height = m_extent.height;
 		framebufferInfo.layers = 1;
@@ -146,6 +155,52 @@ void SwapChain::createImageViews(VulkanContext& context) {
 	}
 }
 
+void SwapChain::createDepthResources(VulkanContext& context) {
+	m_depthFormat = findDepthFormat(context);
+
+	// Create depth image with VMA
+	VkImageCreateInfo imageInfo{};
+	imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+	imageInfo.imageType = VK_IMAGE_TYPE_2D;
+	imageInfo.extent.width = m_extent.width;
+	imageInfo.extent.height = m_extent.height;
+	imageInfo.extent.depth = 1;
+	imageInfo.mipLevels = 1;
+	imageInfo.arrayLayers = 1;
+	imageInfo.format = m_depthFormat;
+	imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+	imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	imageInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+	imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+	imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+	VmaAllocationCreateInfo allocInfo{};
+	allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+	allocInfo.flags = VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT;
+
+	if (vmaCreateImage(m_allocator, &imageInfo, &allocInfo, &m_depthImage,
+	                   &m_depthImageAllocation, nullptr) != VK_SUCCESS) {
+		throw std::runtime_error("Failed to create depth image!");
+	}
+
+	// Create depth image view
+	VkImageViewCreateInfo viewInfo{};
+	viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+	viewInfo.image = m_depthImage;
+	viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+	viewInfo.format = m_depthFormat;
+	viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+	viewInfo.subresourceRange.baseMipLevel = 0;
+	viewInfo.subresourceRange.levelCount = 1;
+	viewInfo.subresourceRange.baseArrayLayer = 0;
+	viewInfo.subresourceRange.layerCount = 1;
+
+	if (vkCreateImageView(m_device, &viewInfo, nullptr, &m_depthImageView) !=
+	    VK_SUCCESS) {
+		throw std::runtime_error("Failed to create depth image view!");
+	}
+}
+
 VkSurfaceFormatKHR SwapChain::chooseSwapSurfaceFormat(
     const std::vector<VkSurfaceFormatKHR>& availableFormats) {
 	// Prefer SRGB if available
@@ -192,4 +247,34 @@ VkExtent2D SwapChain::chooseSwapExtent(
 
 		return actualExtent;
 	}
+}
+
+VkFormat SwapChain::findDepthFormat(VulkanContext& context) {
+	return findSupportedFormat(
+	    context,
+	    {VK_FORMAT_D32_SFLOAT, VK_FORMAT_D32_SFLOAT_S8_UINT,
+	     VK_FORMAT_D24_UNORM_S8_UINT},
+	    VK_IMAGE_TILING_OPTIMAL,
+	    VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT);
+}
+
+VkFormat SwapChain::findSupportedFormat(VulkanContext& context,
+                                        const std::vector<VkFormat>& candidates,
+                                        VkImageTiling tiling,
+                                        VkFormatFeatureFlags features) {
+	for (VkFormat format : candidates) {
+		VkFormatProperties props;
+		vkGetPhysicalDeviceFormatProperties(context.getPhysicalDevice(), format,
+		                                    &props);
+
+		if (tiling == VK_IMAGE_TILING_LINEAR &&
+		    (props.linearTilingFeatures & features) == features) {
+			return format;
+		} else if (tiling == VK_IMAGE_TILING_OPTIMAL &&
+		           (props.optimalTilingFeatures & features) == features) {
+			return format;
+		}
+	}
+
+	throw std::runtime_error("Failed to find supported format!");
 }

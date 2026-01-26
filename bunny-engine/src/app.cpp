@@ -36,7 +36,7 @@ void Application::initVulkan() {
 }
 
 void Application::initScene() {
-	// Create camera entity
+	// Camera
 	m_activeCamera = m_world.createEntity();
 	m_world.addComponent(m_activeCamera,
 	                     Transform{.position = glm::vec3(0.0f, 2.0f, 8.0f)});
@@ -45,26 +45,20 @@ void Application::initScene() {
 	    Camera{.fov = 45.0f, .nearPlane = 0.1f, .farPlane = 100.0f});
 	m_cameraSystem.setActiveCamera(m_activeCamera);
 
-	// Load a mesh from file (try this after creating the file)
-	uint32_t loadedMeshID =
-	    m_renderSystem.loadMesh("assets/models/viking_room.obj");
-
-	// Parent cube (built-in mesh 0)
-	Entity parent = m_world.createEntity();
-	m_world.addComponent(parent,
+	// Front cube (should occlude back cube)
+	Entity frontCube = m_world.createEntity();
+	m_world.addComponent(frontCube,
 	                     Transform{.position = glm::vec3(0.0f, 0.0f, 0.0f),
-	                               .scale = glm::vec3(1.5f)});
-	m_world.addComponent(parent, MeshRenderer{.meshID = 0, .visible = true});
+	                               .scale = glm::vec3(1.0f)});
+	m_world.addComponent(frontCube, MeshRenderer{.meshID = 0, .visible = true});
 
-	// Child using loaded mesh
-	Entity loadedEntity = m_world.createEntity();
-	m_world.addComponent(loadedEntity,
-	                     Transform{.position = glm::vec3(3.0f, 0.0f, 0.0f),
-	                               .scale = glm::vec3(2.0f)});
+	// Back cube (should be partially hidden)
+	Entity backCube = m_world.createEntity();
 	m_world.addComponent(
-	    loadedEntity,
-	    MeshRenderer{.meshID = loadedMeshID,  // Use the loaded mesh
-	                 .visible = true});
+	    backCube, Transform{.position = glm::vec3(0.5f, 0.5f,
+	                                              -2.0f),  // Behind and offset
+	                        .scale = glm::vec3(1.0f)});
+	m_world.addComponent(backCube, MeshRenderer{.meshID = 0, .visible = true});
 
 	std::cout << "Created " << m_world.getEntityCount() << " entities\n";
 }
