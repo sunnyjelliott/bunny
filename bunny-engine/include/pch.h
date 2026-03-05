@@ -3,20 +3,26 @@
 #include <pxr/pxr.h>
 
 #include <pxr/base/gf/matrix4d.h>
+#include <pxr/base/gf/quatd.h>
+#include <pxr/base/gf/quaternion.h>
+#include <pxr/base/gf/rotation.h>
 #include <pxr/base/gf/vec3f.h>
 
 #include <pxr/usd/usd/stage.h>
 #include <pxr/usd/usdGeom/cone.h>
 #include <pxr/usd/usdGeom/cube.h>
+#include <pxr/usd/usdGeom/cylinder.h>
 #include <pxr/usd/usdGeom/mesh.h>
 #include <pxr/usd/usdGeom/sphere.h>
 #include <pxr/usd/usdGeom/xform.h>
+#include <pxr/base/tf/diagnosticMgr.h>
 
 PXR_NAMESPACE_USING_DIRECTIVE
 
 #include <algorithm>
 #include <array>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <limits>

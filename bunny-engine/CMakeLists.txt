@@ -6,12 +6,24 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_VERBOSE_MAKEFILE ON)
 
+if(WIN32)
+    if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+        message(STATUS "Switching to MSVC for USD compatibility")
+        set(CMAKE_C_COMPILER "cl" CACHE FILEPATH "C compiler" FORCE)
+        set(CMAKE_CXX_COMPILER "cl" CACHE FILEPATH "C++ compiler" FORCE)
+    endif()
+endif()
+
 include(FetchContent)
 
-# Vulkan
+# --------------------------------
+#            Vulkan
+# --------------------------------
 find_package(Vulkan REQUIRED)
 
-# GLFW
+# --------------------------------
+#             GLFW
+# --------------------------------
 find_package(glfw3 3.4 QUIET)
 if(NOT glfw3_FOUND)
     message(STATUS "GLFW not found via find_package, fetching from source...")
@@ -35,7 +47,9 @@ else()
     message(STATUS "Found GLFW via find_package")
 endif()
 
-# GLM
+# --------------------------------
+#               GLM
+# --------------------------------
 find_package(glm QUIET)
 if(NOT glm_FOUND)
     message(STATUS "GLM not found via find_package, fetching from source...")
@@ -52,7 +66,9 @@ else()
     message(STATUS "Found GLM via find_package")
 endif()
 
-# tinyobjloader
+# --------------------------------
+#           tinyobjloader
+# --------------------------------
 FetchContent_Declare(
     tinyobjloader
     GIT_REPOSITORY https://github.com/tinyobjloader/tinyobjloader.git
@@ -61,7 +77,9 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(tinyobjloader)
 
-# vma
+# --------------------------------
+#               vma
+# --------------------------------
 FetchContent_Declare(
     vma
     GIT_REPOSITORY https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git
@@ -70,21 +88,49 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(vma)
 
-# OpenUSD
+# --------------------------------
+#             OpenUSD
+# --------------------------------
+
+# Location selection (arg|env|vcpkg)
 set(USD_ROOT "" CACHE PATH "Path to manual OpenUSD install")
-
-set(USD_ROOT "" CACHE PATH "Path to manual OpenUSD install (base directory)")
-
 if(NOT USD_ROOT AND DEFINED ENV{USD_ROOT})
     set(USD_ROOT $ENV{USD_ROOT})
 endif()
 
 if(USD_ROOT)
-    # Determine which USD build variant to use based on configuration
+
+    # Build variant selection
     if(CMAKE_BUILD_TYPE MATCHES "Debug")
         set(USD_VARIANT_DIR "${USD_ROOT}/debug")
     else()
         set(USD_VARIANT_DIR "${USD_ROOT}/release")
+    endif()
+    # Detect what compiler USD was built with
+    set(USD_CACHE_FILE "${USD_VARIANT_DIR}/build/OpenUSD/CMakeCache.txt")
+    if(EXISTS ${USD_CACHE_FILE})
+        file(STRINGS ${USD_CACHE_FILE} USD_COMPILER_LINE REGEX "CMAKE_CXX_COMPILER:FILEPATH=")
+        if(USD_COMPILER_LINE)
+            string(REGEX MATCH "=(.+)$" _ ${USD_COMPILER_LINE})
+            set(USD_COMPILER ${CMAKE_MATCH_1})  
+            get_filename_component(USD_COMPILER_NAME ${USD_COMPILER} NAME_WE)
+            
+            message(STATUS "USD was built with compiler: ${USD_COMPILER_NAME}")
+            
+            # Force matching compiler if different
+            get_filename_component(CURRENT_COMPILER_NAME ${CMAKE_CXX_COMPILER} NAME_WE)
+            if(NOT CURRENT_COMPILER_NAME STREQUAL USD_COMPILER_NAME)
+                message(WARNING "Compiler mismatch detected!")
+                message(WARNING "  USD built with: ${USD_COMPILER_NAME}")
+                message(WARNING "  Current compiler: ${CURRENT_COMPILER_NAME}")
+                message(STATUS "Switching to USD's compiler: ${USD_COMPILER}")
+                
+                set(CMAKE_C_COMPILER ${USD_COMPILER} CACHE FILEPATH "C compiler" FORCE)
+                set(CMAKE_CXX_COMPILER ${USD_COMPILER} CACHE FILEPATH "C++ compiler" FORCE)
+                
+                message(FATAL_ERROR "Compiler changed. Please reconfigure from clean build directory.")
+            endif()
+        endif()
     endif()
     
     if(EXISTS "${USD_VARIANT_DIR}/lib/cmake")
@@ -117,6 +163,8 @@ set(USD_LIBS
     usdShade
     usdLux
 )
+
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
 
 file(GLOB SOURCES src/*)
 add_executable(${PROJECT_NAME} 
@@ -170,18 +218,21 @@ add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
 )
 
 if(USD_ROOT)
-    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+    set(USD_COPY_STAMP "${CMAKE_BINARY_DIR}/usd_dlls_copied.stamp")
+
+    add_custom_command(
+        OUTPUT ${USD_COPY_STAMP}
         COMMAND ${CMAKE_COMMAND} -E copy_directory
-            ${USD_VARIANT_DIR}/bin
-            ${CMAKE_BINARY_DIR}
-        COMMENT "Copying USD DLLs (${CMAKE_BUILD_TYPE}) to build directory"
-    )
-    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+            ${USD_VARIANT_DIR}/bin ${CMAKE_BINARY_DIR}
         COMMAND ${CMAKE_COMMAND} -E copy_directory
-            ${USD_VARIANT_DIR}/lib
-            ${CMAKE_BINARY_DIR}
-        COMMENT "Copying USD libs (${CMAKE_BUILD_TYPE}) to build directory"
+            ${USD_VARIANT_DIR}/lib/usd ${CMAKE_BINARY_DIR}/usd
+        COMMAND ${CMAKE_COMMAND} -E touch ${USD_COPY_STAMP}
+        COMMENT "Copying USD DLLs and plugins (${CMAKE_BUILD_TYPE})"
+        DEPENDS ${USD_VARIANT_DIR}/bin ${USD_VARIANT_DIR}/lib/usd
     )
+
+    add_custom_target(CopyUsdDlls DEPENDS ${USD_COPY_STAMP})
+    add_dependencies(${PROJECT_NAME} CopyUsdDlls)
 endif()
 
 target_include_directories(${PROJECT_NAME} PRIVATE 

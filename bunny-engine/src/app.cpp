@@ -3,6 +3,28 @@
 #include <vk_mem_alloc.h>
 
 #include "input.h"
+#include "sceneloader.h"
+
+namespace {
+class UsdDiagnosticDelegate final : public TfDiagnosticMgr::Delegate {
+   public:
+	void IssueError(TfError const& err) override {
+		std::cout << "[USD ERROR] " << err.GetCommentary() << "\n  in "
+		          << err.GetSourceFunction() << " (" << err.GetSourceFileName()
+		          << ":" << err.GetSourceLineNumber() << ")" << std::endl;
+	}
+	void IssueFatalError(TfCallContext const& ctx,
+	                     std::string const& msg) override {
+		std::cout << "[USD FATAL] " << msg << "\n  in " << ctx.GetFunction()
+		          << " (" << ctx.GetFile() << ":" << ctx.GetLine() << ")"
+		          << std::endl;
+	}
+	void IssueStatus(TfStatus const&) override {}
+	void IssueWarning(TfWarning const& w) override {
+		std::cout << "[USD WARN] " << w.GetCommentary() << std::endl;
+	}
+};
+}  // namespace
 
 void Application::run() {
 	initWindow();
@@ -36,6 +58,9 @@ void Application::initVulkan() {
 }
 
 void Application::initScene() {
+	static UsdDiagnosticDelegate usdDelegate;
+	TfDiagnosticMgr::GetInstance().AddDelegate(&usdDelegate);
+
 	// Camera
 	m_activeCamera = m_world.createEntity();
 	m_world.addComponent(m_activeCamera,
@@ -45,31 +70,26 @@ void Application::initScene() {
 	    Camera{.fov = 45.0f, .nearPlane = 0.1f, .farPlane = 100.0f});
 	m_cameraSystem.setActiveCamera(m_activeCamera);
 
-	// Test 1: Multiple meshes, single entity
-	Entity multiMesh = m_world.createEntity();
-	m_world.addComponent(multiMesh,
-	                     Transform{.position = glm::vec3(-3.0f, 0.0f, 0.0f),
-	                               .scale = glm::vec3(0.8f)});
-	MeshRenderer multi;
-	multi.meshIDs = {0, 1};  // Cube + pyramid overlapping
-	m_world.addComponent(multiMesh, multi);
+	m_cameraSystem.setActiveCamera(m_activeCamera);
 
-	// Test 2: Hierarchical meshes
-	Entity parent = m_world.createEntity();
-	m_world.addComponent(parent,
-	                     Transform{.position = glm::vec3(3.0f, 0.0f, 0.0f),
-	                               .scale = glm::vec3(1.0f)});
-	m_world.addComponent(parent, MeshRenderer{.meshID = 0});  // Parent cube
+	// Get absolute path properly
+	std::filesystem::path scenePath =
+	    std::filesystem::current_path() / "assets\\models\\test_scene.usda";
+	std::cout << "Current directory: " << std::filesystem::current_path()
+	          << std::endl;
+	std::cout << "Scene path: " << scenePath << std::endl;
+	std::cout << "File exists: " << std::filesystem::exists(scenePath)
+	          << std::endl;
 
-	Entity child = m_world.createEntity();
-	m_world.addComponent(
-	    child,
-	    Transform{.position = glm::vec3(0.0f, 1.5f, 0.0f),  // Above parent
-	              .scale = glm::vec3(0.5f)});
-	m_world.addComponent(child, MeshRenderer{.meshID = 1});  // Child pyramid
-	m_world.setParent(child, parent);
+	if (!std::filesystem::exists(scenePath)) {
+		std::cerr << "ERROR: test_scene.usda not found!" << std::endl;
+		return;
+	}
 
-	std::cout << "Created " << m_world.getEntityCount() << " entities\n";
+	// Load USD test scene
+	SceneLoader::loadScene(scenePath.string(), m_world);
+
+	std::cout << "Total entities: " << m_world.getEntityCount() << std::endl;
 }
 
 void Application::mainLoop() {
