@@ -218,21 +218,16 @@ add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
 )
 
 if(USD_ROOT)
-    set(USD_COPY_STAMP "${CMAKE_BINARY_DIR}/usd_dlls_copied.stamp")
-
-    add_custom_command(
-        OUTPUT ${USD_COPY_STAMP}
+    file(GLOB USD_LIB_DLLS "${USD_VARIANT_DIR}/lib/*.dll")
+    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             ${USD_VARIANT_DIR}/bin ${CMAKE_BINARY_DIR}
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${USD_LIB_DLLS} ${CMAKE_BINARY_DIR}
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             ${USD_VARIANT_DIR}/lib/usd ${CMAKE_BINARY_DIR}/usd
-        COMMAND ${CMAKE_COMMAND} -E touch ${USD_COPY_STAMP}
         COMMENT "Copying USD DLLs and plugins (${CMAKE_BUILD_TYPE})"
-        DEPENDS ${USD_VARIANT_DIR}/bin ${USD_VARIANT_DIR}/lib/usd
     )
-
-    add_custom_target(CopyUsdDlls DEPENDS ${USD_COPY_STAMP})
-    add_dependencies(${PROJECT_NAME} CopyUsdDlls)
 endif()
 
 target_include_directories(${PROJECT_NAME} PRIVATE 

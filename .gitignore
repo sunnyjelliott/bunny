@@ -1,5 +1,7 @@
+.claude/
 build/
 .vscode/
+compile_commands.json
 vcpkg/
 .clang-format
 *.exe

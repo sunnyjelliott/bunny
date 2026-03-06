@@ -116,9 +116,13 @@ Entity SceneLoader::traverseUsdPrim(const UsdPrim& prim, World& world,
 
 	if (isUsdGeometry(prim)) {
 		std::cout << "  -> Geometry prim detected" << std::endl;
-		// TODO: Create mesh from USD geometry
-		// uint32_t meshID = createMeshFromUsdGeom(prim);
-		// world.addComponent(entity, MeshRenderer{.meshID = meshID});
+		uint32_t meshID = createMeshFromUsdGeom(prim);
+
+		MeshRenderer renderer;
+		renderer.meshID = meshID;
+		renderer.visible = true;
+
+		world.addComponent(entity, renderer);
 	}
 
 	for (const UsdPrim& child : prim.GetChildren()) {
@@ -174,6 +178,57 @@ bool SceneLoader::isUsdGeometry(const UsdPrim& prim) {
 }
 
 uint32_t SceneLoader::createMeshFromUsdGeom(const UsdPrim& prim) {
-	std::cerr << "Mesh extraction not yet implemented" << std::endl;
+	// Handle explicit mesh data
+	if (prim.IsA<UsdGeomMesh>()) {
+		UsdGeomMesh mesh(prim);
+
+		// Get vertex positions
+		UsdAttribute pointsAttr = mesh.GetPointsAttr();
+		VtArray<GfVec3f> points;
+		pointsAttr.Get(&points);
+
+		// Get face vertex indices
+		UsdAttribute faceVertexIndicesAttr = mesh.GetFaceVertexIndicesAttr();
+		VtArray<int> faceVertexIndices;
+		faceVertexIndicesAttr.Get(&faceVertexIndices);
+
+		// Get face vertex counts
+		UsdAttribute faceVertexCountsAttr = mesh.GetFaceVertexCountsAttr();
+		VtArray<int> faceVertexCounts;
+		faceVertexCountsAttr.Get(&faceVertexCounts);
+
+		std::cout << "  USD Mesh: " << points.size() << " points, "
+		          << faceVertexCounts.size() << " faces" << std::endl;
+
+		// TODO: Triangulate and upload mesh
+		// For now, return 0 (cube) as placeholder
+		return 0;
+	}
+
+	// Handle schema primitives - map to hardcoded meshes
+	if (prim.IsA<UsdGeomCube>()) {
+		std::cout << "  -> Mapping to hardcoded Cube mesh (ID: 0)" << std::endl;
+		return 0;  // Cube mesh
+	}
+
+	if (prim.IsA<UsdGeomSphere>()) {
+		std::cout << "  -> Mapping to hardcoded Sphere mesh (ID: 1)"
+		          << std::endl;
+		return 1;  // Sphere mesh (need to add to RenderSystem)
+	}
+
+	if (prim.IsA<UsdGeomCone>()) {
+		std::cout << "  -> Mapping to hardcoded Cone/Pyramid mesh (ID: 1)"
+		          << std::endl;
+		return 1;  // Pyramid is cone-ish
+	}
+
+	if (prim.IsA<UsdGeomCylinder>()) {
+		std::cout << "  -> Cylinder not yet supported" << std::endl;
+		return 0;  // Fallback to cube
+	}
+
+	std::cerr << "  -> Unknown geometry type: " << prim.GetTypeName()
+	          << std::endl;
 	return 0;
 }
