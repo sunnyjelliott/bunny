@@ -4,6 +4,7 @@
 
 #include "camerasystem.h"
 #include "meshloader.h"
+#include "primitives.h"
 #include "world.h"
 
 static std::vector<char> readFile(const std::string& filename) {
@@ -38,106 +39,6 @@ static uint32_t findMemoryType(VkPhysicalDevice physicalDevice,
 	}
 
 	throw std::runtime_error("Failed to find suitable memory type!");
-}
-
-std::vector<Vertex> createCubeVertices() {
-	return {
-	    // 8 unique vertices
-	    {{-0.5f, -0.5f, -0.5f}, {0.0f, 1.0f, 1.0f}},  // 0: back-bottom-left
-	    {{0.5f, -0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},   // 1: back-bottom-right
-	    {{0.5f, 0.5f, -0.5f}, {0.0f, 0.0f, 1.0f}},    // 2: back-top-right
-	    {{-0.5f, 0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},   // 3: back-top-left
-	    {{-0.5f, -0.5f, 0.5f}, {1.0f, 0.0f, 0.0f}},   // 4: front-bottom-left
-	    {{0.5f, -0.5f, 0.5f}, {1.0f, 0.0f, 0.0f}},    // 5: front-bottom-right
-	    {{0.5f, 0.5f, 0.5f}, {1.0f, 0.0f, 1.0f}},     // 6: front-top-right
-	    {{-0.5f, 0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}},    // 7: front-top-left
-	};
-}
-
-std::vector<uint32_t> createCubeIndices() {
-	return {
-	    // Front face
-	    4,
-	    5,
-	    6,
-	    4,
-	    6,
-	    7,
-	    // Back face
-	    1,
-	    0,
-	    3,
-	    1,
-	    3,
-	    2,
-	    // Top face
-	    7,
-	    6,
-	    2,
-	    7,
-	    2,
-	    3,
-	    // Bottom face
-	    0,
-	    1,
-	    5,
-	    0,
-	    5,
-	    4,
-	    // Right face
-	    5,
-	    1,
-	    2,
-	    5,
-	    2,
-	    6,
-	    // Left face
-	    0,
-	    4,
-	    7,
-	    0,
-	    7,
-	    3,
-	};
-}
-
-std::vector<Vertex> createPyramidVertices() {
-	return {
-	    // 5 unique vertices
-	    {{-0.5f, 0.0f, -0.5f}, {1.0f, 1.0f, 1.0f}},  // 0: base back-left
-	    {{0.5f, 0.0f, -0.5f}, {1.0f, 1.0f, 1.0f}},   // 1: base back-right
-	    {{0.5f, 0.0f, 0.5f}, {1.0f, 1.0f, 1.0f}},    // 2: base front-right
-	    {{-0.5f, 0.0f, 0.5f}, {1.0f, 1.0f, 1.0f}},   // 3: base front-left
-	    {{0.0f, 1.0f, 0.0f}, {1.0f, 1.0f, 0.0f}},    // 4: apex
-	};
-}
-
-std::vector<uint32_t> createPyramidIndices() {
-	return {
-	    // Base
-	    0,
-	    1,
-	    2,
-	    0,
-	    2,
-	    3,
-	    // Front
-	    3,
-	    2,
-	    4,
-	    // Right
-	    2,
-	    1,
-	    4,
-	    // Back
-	    1,
-	    0,
-	    4,
-	    // Left
-	    0,
-	    3,
-	    4,
-	};
 }
 
 void RenderSystem::initialize(VulkanContext& context, SwapChain& swapChain) {
@@ -755,30 +656,40 @@ void RenderSystem::createMeshBuffers() {
 	// Load built-in meshes
 
 	// Mesh 0: Cube
-	auto cubeVerts = createCubeVertices();
-	auto cubeIndices = createCubeIndices();
+	auto cubeGeom = Primitives::createCube(1.0f);
 	m_meshes[m_nextMeshID++] = {
 	    .firstVertex = static_cast<uint32_t>(m_allVertices.size()),
-	    .vertexCount = static_cast<uint32_t>(cubeVerts.size()),
+	    .vertexCount = static_cast<uint32_t>(cubeGeom.vertices.size()),
 	    .firstIndex = static_cast<uint32_t>(m_allIndices.size()),
-	    .indexCount = static_cast<uint32_t>(cubeIndices.size())};
-	m_allVertices.insert(m_allVertices.end(), cubeVerts.begin(),
-	                     cubeVerts.end());
-	m_allIndices.insert(m_allIndices.end(), cubeIndices.begin(),
-	                    cubeIndices.end());
+	    .indexCount = static_cast<uint32_t>(cubeGeom.indices.size())};
+	m_allVertices.insert(m_allVertices.end(), cubeGeom.vertices.begin(),
+	                     cubeGeom.vertices.end());
+	m_allIndices.insert(m_allIndices.end(), cubeGeom.indices.begin(),
+	                    cubeGeom.indices.end());
 
-	// Mesh 1: Pyramid
-	auto pyramidVerts = createPyramidVertices();
-	auto pyramidIndices = createPyramidIndices();
+	// Mesh 1: Sphere
+	auto sphereGeom = Primitives::createSphere(1.0f, 16, 16);
 	m_meshes[m_nextMeshID++] = {
 	    .firstVertex = static_cast<uint32_t>(m_allVertices.size()),
-	    .vertexCount = static_cast<uint32_t>(pyramidVerts.size()),
+	    .vertexCount = static_cast<uint32_t>(sphereGeom.vertices.size()),
 	    .firstIndex = static_cast<uint32_t>(m_allIndices.size()),
-	    .indexCount = static_cast<uint32_t>(pyramidIndices.size())};
-	m_allVertices.insert(m_allVertices.end(), pyramidVerts.begin(),
-	                     pyramidVerts.end());
-	m_allIndices.insert(m_allIndices.end(), pyramidIndices.begin(),
-	                    pyramidIndices.end());
+	    .indexCount = static_cast<uint32_t>(sphereGeom.indices.size())};
+	m_allVertices.insert(m_allVertices.end(), sphereGeom.vertices.begin(),
+	                     sphereGeom.vertices.end());
+	m_allIndices.insert(m_allIndices.end(), sphereGeom.indices.begin(),
+	                    sphereGeom.indices.end());
+
+	// Mesh 2: Cone
+	auto coneGeom = Primitives::createCone(1.0f, 2.0f, 16);
+	m_meshes[m_nextMeshID++] = {
+	    .firstVertex = static_cast<uint32_t>(m_allVertices.size()),
+	    .vertexCount = static_cast<uint32_t>(coneGeom.vertices.size()),
+	    .firstIndex = static_cast<uint32_t>(m_allIndices.size()),
+	    .indexCount = static_cast<uint32_t>(coneGeom.indices.size())};
+	m_allVertices.insert(m_allVertices.end(), coneGeom.vertices.begin(),
+	                     coneGeom.vertices.end());
+	m_allIndices.insert(m_allIndices.end(), coneGeom.indices.begin(),
+	                    coneGeom.indices.end());
 
 	// Upload to GPU
 	uploadMeshData(m_allVertices, m_allIndices);

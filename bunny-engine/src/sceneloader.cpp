@@ -214,13 +214,13 @@ uint32_t SceneLoader::createMeshFromUsdGeom(const UsdPrim& prim) {
 	if (prim.IsA<UsdGeomSphere>()) {
 		std::cout << "  -> Mapping to hardcoded Sphere mesh (ID: 1)"
 		          << std::endl;
-		return 1;  // Sphere mesh (need to add to RenderSystem)
+		return 1;  // Sphere mesh
 	}
 
 	if (prim.IsA<UsdGeomCone>()) {
 		std::cout << "  -> Mapping to hardcoded Cone/Pyramid mesh (ID: 1)"
 		          << std::endl;
-		return 1;  // Pyramid is cone-ish
+		return 2;  // Cone mesh
 	}
 
 	if (prim.IsA<UsdGeomCylinder>()) {
